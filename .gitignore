@@ -1,0 +1,23 @@
+# Local environments and editor state
+.venv/
+.vs/
+.ipynb_checkpoints/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.env
+.env.*
+!.env.example
+
+# Research data, derived features, trained models, and experiment artifacts
+# stay local.  In particular, no participant recordings or metadata belong in
+# this source repository.
+data/
+outputs/**
+!outputs/
+!outputs/README.md
+output/
+tmp/
+models/saved/**
+*.joblib
+*.log
