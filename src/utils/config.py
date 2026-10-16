@@ -3,7 +3,7 @@ import math
 import yaml
 
 
-def load_config(config_path='config/config.yaml'):
+def load_config(config_path='src/config/config.yaml'):
     with Path(config_path).open(encoding='utf-8-sig') as f:
         c = yaml.safe_load(f)
     root = Path(__file__).resolve().parents[2]

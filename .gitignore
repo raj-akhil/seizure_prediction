@@ -1,4 +1,4 @@
-# Local environments and editor state
+# Local Python/editor state
 .venv/
 .vs/
 .ipynb_checkpoints/
@@ -9,15 +9,10 @@ __pycache__/
 .env.*
 !.env.example
 
-# Research data, derived features, trained models, and experiment artifacts
-# stay local.  In particular, no participant recordings or metadata belong in
-# this source repository.
-data/
-outputs/**
-!outputs/
-!outputs/README.md
-output/
-tmp/
-models/saved/**
+# Original participant data and generated results stay local.
+# Anchor these paths so src/data/ remains a source package.
+/data/
+/audit/**
+!/audit/README.md
 *.joblib
 *.log

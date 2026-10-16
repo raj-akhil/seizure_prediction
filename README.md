@@ -1,152 +1,198 @@
-# Seizure forecasting research pipeline
+# Seizure prediction — two-notebook workflow
 
-Configurable EEG, ECG, EMG and motion preprocessing, feature extraction, patient-separated training, forecasting validation and a local experiment dashboard.
+Start with the two notebooks in this folder. They contain editable parameters, explanations, expected outputs, plots and debugging checks. You do not need the older dashboard or command-line tools.
 
-## What this repository contains
+1. **[01_prepare_data.ipynb](01_prepare_data.ipynb)** discovers participant recordings, checks files, filters/windows signals, assigns forecast labels and extracts trainable features.
+2. **[02_train_model.ipynb](02_train_model.ipynb)** reads that dataset, checks patient splits, fits/compares models, chooses an alarm threshold, evaluates held-out patients and saves the trained pipeline.
 
-This repository contains **source code, configuration templates, tests and documentation only**. It does not contain participant recordings, annotations, prepared features, trained models, experiment reports or other generated data.
+Run notebook 1 from top to bottom, then notebook 2. Use the same `DATASET_NAME`. Change parameters near the top; after a change, restart the kernel and run from the beginning.
 
-The workflow is a research tool, not a clinical device. Its evaluation is conditional on eligible observation windows and does not establish clinical safety or effectiveness.
+**The GitHub repository contains code, notebooks and documentation only. It does not include the recordings, a Python environment, prepared features or trained models. Download data separately using step 2 below.**
 
-## Before you start
+## 1. Set up Python
 
-### 1. Create a Python environment
-
-The commands below use PowerShell on Windows and Python 3.10 or later:
+Install [Python 3.11](https://www.python.org/downloads/) and [Git](https://git-scm.com/downloads). Clone/download this project, open PowerShell, and change into the folder containing this README. Run:
 
 ```powershell
 py -3.11 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install --upgrade pip
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.venv/Scripts/python.exe -m pip install -r requirements.txt
+.venv/Scripts/python.exe -m ipykernel install --user --name seizure-prediction --display-name "Python (seizure_prediction)"
 ```
 
-### 2. Download SeizeIT2 yourself
+If `.venv` already exists on your machine, reuse it and run the installation command to update its dependencies. There is no need to activate it: the commands use its Python executable explicitly. The optional LSTM dependency, PyTorch, is included in `requirements.txt`; initial installation may take time and disk space.
 
-The input data for this project is the **SeizeIT2** wearable epilepsy dataset. Download it from the official [NEMAR SeizeIT2 dataset page](https://www.nemar.org/dataset/on005873) (DOI: `10.82901/nemar.on005873`) or its linked official distribution methods. The full dataset is large, so obtain only the participants and recordings needed for your experiment where possible.
+Run every command below from the **project root**, not from `src/` or `data/`.
 
-After downloading, place the BIDS participant folders and their accompanying recording/event files under `data/raw/`, for example:
+## 2. Download SeizeIT2 and put it in `data/raw/`
+
+### Dataset and download tools
+
+Use the official **SeizeIT2** dataset: [OpenNeuro `ds005873`](https://openneuro.org/datasets/ds005873/versions/1.1.0), also available as [NEMAR `on005873`](https://nemar.org/dataset/on005873). Review its licence/access conditions and cite the dataset when publishing results. Download the original EDF recordings and their annotations/metadata; this project does not accept screenshots or a Zarr-only streaming cache as replacements.
+
+The PowerShell instructions below download directly from OpenNeuro's public S3 copy into the correct project folders. Install [AWS CLI v2 for Windows](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html), reopen PowerShell if necessary, and check:
+
+```powershell
+aws --version
+```
+
+`--no-sign-request` uses public access; you do not need to configure AWS credentials. The [`aws s3 sync` documentation](https://docs.aws.amazon.com/cli/latest/reference/s3/sync.html) explains the command. The bucket is the current public copy, rather than a pinned release: record your download date and retain the downloaded metadata for reproducibility. For a specific release or alternative download method, use the dataset pages above or the [official NEMAR download guide](https://docs.nemar.org/cli/guides/downloading/).
+
+### Download the first ten participants
+
+From the project root, run this PowerShell block. It downloads every sensor, recording and accompanying file for `sub-001` through `sub-010`, preserving filenames and directories:
+
+```powershell
+New-Item -ItemType Directory -Path data/raw -Force | Out-Null
+
+foreach ($number in 1..10) {
+    $subject = "sub-{0:D3}" -f $number
+    aws s3 sync --no-sign-request "s3://openneuro.org/ds005873/$subject/" "data/raw/$subject/"
+    if ($LASTEXITCODE -ne 0) { throw "Download failed for $subject. Rerun after fixing the connection." }
+}
+```
+
+This is a substantial download. The ten-participant copy inspected during development was about **9.88 GiB**, before generated data; allow additional space for prepared arrays and models. That size is a local example, not a guarantee for another dataset version. Rerun the same command after interruption: `sync` skips files it considers unchanged and retries missing/changed files. The preparation notebook checks the downloaded recording headers and metadata before processing.
+
+To add a specific participant later:
+
+```powershell
+aws s3 sync --no-sign-request "s3://openneuro.org/ds005873/sub-011/" "data/raw/sub-011/"
+```
+
+Change `1..10` to the desired range to download a larger cohort. You can also choose individual participants rather than a range. Do not download only EEG if you plan to enable ECG, EMG and motion in the notebook.
+
+### Required local folder layout
+
+Participant folders must be **direct children of `data/raw/`**. For one recording, the expected layout is:
 
 ```text
 data/raw/
 └── sub-001/
     └── ses-01/
-        └── ... recording and event files ...
+        ├── eeg/
+        │   ├── sub-001_ses-01_task-szMonitoring_run-01_eeg.edf
+        │   ├── sub-001_ses-01_task-szMonitoring_run-01_eeg.json
+        │   └── sub-001_ses-01_task-szMonitoring_run-01_events.tsv
+        ├── ecg/
+        │   ├── sub-001_ses-01_task-szMonitoring_run-01_ecg.edf
+        │   └── sub-001_ses-01_task-szMonitoring_run-01_ecg.json
+        ├── emg/
+        │   ├── sub-001_ses-01_task-szMonitoring_run-01_emg.edf
+        │   └── sub-001_ses-01_task-szMonitoring_run-01_emg.json
+        └── mov/
+            ├── sub-001_ses-01_task-szMonitoring_run-01_mov.edf
+            └── sub-001_ses-01_task-szMonitoring_run-01_mov.json
 ```
 
-Do **not** commit anything in `data/`. It is intentionally excluded from Git because it can contain sensitive participant data and large derived artifacts. You are responsible for meeting the dataset licence, access conditions and institutional data-governance requirements.
+Keep each `.edf` signal file, its `.json` sidecar and the matching `_events.tsv` annotation file. Do not rename files, flatten sensor folders, mix runs, or copy Git/git-annex pointer files instead of real recording contents. The event timeline uses the EEG recording origin even if you select other signal types.
 
-### 3. Start the local dashboard
+If you download through a browser or another tool, extract/copy the `sub-*` directories into `data/raw/`, with the structure above. If the download contains dataset-level files such as `dataset_description.json`, `participants.tsv`, `participants.json` and `events.json`, retain those alongside the participant folders for provenance. Avoid an extra wrapper such as `data/raw/ds005873/sub-001/`; the notebook's default `RAW_DIR` is `data/raw/`. Do not copy the downloaded dataset's `.git` directory into this project.
 
-From the project directory:
+Check placement from PowerShell:
 
 ```powershell
-.venv/Scripts/python.exe dashboard.py
+Get-ChildItem data/raw -Directory
+Get-ChildItem data/raw -Recurse -File -Filter *.edf | Measure-Object
+Get-ChildItem data/raw -Recurse -File -Filter *_events.tsv | Measure-Object
 ```
 
-Open **http://127.0.0.1:8765**. Select **Load synthetic test → Start experiment** for a tiny synthetic end-to-end test. Use **Reset defaults** before configuring real patient data. [Dashboard guide](docs/DASHBOARD.md)
+The development copy had **10 participants, 420 EDF files and 105 event TSV files**. Other selections/releases may differ. Notebook 1's inventory gives the selected recording count, annotations and missing-file problems; file counts alone do not prove integrity.
 
-For a fast check on the downloaded real recordings, choose **Load real-data check → Start experiment**. It uses four exact recordings, explicit patient partitions and a separate 5–10-minute forecast target. [Why the earlier full run failed and how this check works](docs/REAL_DATA_CHECK.md). The synthetic button is now named **Load synthetic test**.
+## 3. Run preprocessing, then training
 
-## Typical workflow
+Start Jupyter from the project root:
 
-1. Download and locally store an approved SeizeIT2 subset in `data/raw/`.
-2. Configure modalities, forecast horizon and patient partitions in `config/config.yaml` or the dashboard.
-3. Run preprocessing and feature preparation.
-4. Use the readiness check to verify disjoint patient partitions, class coverage and grouped folds.
-5. Start training only after readiness succeeds; model selection happens within training-subject cross-validation, then held-out validation selects the alarm threshold, followed by one test evaluation.
-6. Treat saved metrics as research results and inspect their documented limitations before drawing conclusions.
+```powershell
+.venv/Scripts/python.exe -m notebook .
+```
 
-## Directory map
+Open `01_prepare_data.ipynb` and choose **Python (seizure_prediction)** as the kernel. In VS Code, opening the notebook and selecting `.venv/Scripts/python.exe` works too.
+
+1. In notebook 1, edit the parameters cell. Keep `RAW_DIR = ROOT / "data" / "raw"`. `SUBJECTS = None` discovers all available participants; a list such as `["sub-001", "sub-002"]` limits preparation. `RECORDINGS` can select exact full recording IDs from the inventory.
+2. Run every cell in order. Inspect the source-file inventory, waveform preview, final class counts and exclusions. Wait for **PREPARATION COMPLETE** and a saved `handoff.json`.
+3. Open `02_train_model.ipynb` with the same kernel environment and the same `DATASET_NAME`. Prepared files persist on disk; the two notebooks do not need to share Python variables or remain open simultaneously.
+4. Review the patient assignments and readiness tables. Set explicit `PATIENT_SPLITS` when defining a study, or review the default sorted 70/15/15 draft. Change model grids/feature selection near the top, then run all cells in order.
+5. Wait for **TRAINING COMPLETE**. Inspect the validation/test reports and the saved model. `complete.json` confirms saving and reload verification succeeded.
+
+With the default **three inner folds**, training needs at least **five eligible patients**: at least three training patients, plus distinct validation and test patients. Every partition/fold also needs the required classes/events; five folders alone are not sufficient. Two patients can check preparation and individual fitting functions, but the production training notebook correctly refuses a separate train/validation/test study with only two people. It never falls back to random-window splitting.
+
+The normal notebook run fits the selected models and evaluates held-out patients; run it deliberately. After changing parameters, restart the kernel and run from the top to avoid stale variables. For a first preprocessing trial, select a few exact recordings; for full training, select enough eligible patients. Larger cohorts may need more RAM or a smaller experiment.
+
+## Project structure
 
 ```text
 seizure_prediction/
-├── dashboard.py              # Convenient dashboard launcher
-├── README.md                 # Project overview and commands
-├── requirements.txt          # Python dependencies
-├── config/                   # Default configuration and legacy reference
-├── scripts/                  # Production command-line entry points
-│   ├── preprocess.py
-│   ├── prepare_features.py
-│   ├── train.py
-│   └── validate_model.py
-├── src/                      # Reusable implementation
-│   ├── data/                 # Recording discovery and prepared-data loading
-│   ├── preprocessing/        # Alignment, filtering, windows and labels
-│   ├── features/             # Modality-specific feature extraction
-│   ├── training/             # Patient splits, model registry and fitting
-│   ├── models/               # Feature selection and alarm evaluation
-│   ├── validation/           # Metrics, uncertainty and reports
-│   ├── dashboard/            # API, jobs and browser assets
-│   ├── pipeline/             # Preprocessing orchestration
-│   └── utils/                # Configuration loading
-├── tests/                    # All test/verification code and test notes
-│   ├── test_*.py             # Automated regression tests
-│   ├── smoke/                # Small end-to-end tests
-│   ├── checks/               # Optional prepared-data audits
-│   └── docs/                 # Historical test status notes
-├── docs/                     # Current usage and methodology guides
+├── README.md                   Start here
+├── 01_prepare_data.ipynb        Recordings → trainable features
+├── 02_train_model.ipynb         Features → model and evaluation
+├── requirements.txt            One dependency list, including Jupyter
 ├── data/
-│   ├── raw/                  # Original recordings; preserved
-│   └── interim/              # Prepared arrays, features and manifests
-└── outputs/                  # Generated models, logs, figures and reports
-    ├── dashboard/            # Isolated dashboard experiments
-    ├── training/             # CLI training experiments
-    ├── smoke_tests/          # Synthetic fixtures and test results
-    ├── reports/              # Preprocessing/feature audit summaries
-    ├── figures/              # Standalone figures/PDFs, if produced
-    └── logs/                 # Standalone operational logs
+│   └── raw/                    Original participant folders: sub-001, sub-002, ...
+├── documentation/              Methodology, debugging and maintenance guides
+├── audit/
+│   ├── runs/                   Prepared data, logs, models, reports and checks
+│   ├── archive/                Older generated files and temporary build material
+│   └── maintenance/            Layout migration record and raw-data inventory
+└── src/                        Python implementation used by the notebooks
+    ├── config/                 Advanced defaults; normal parameters are in the notebooks
+    ├── commands/               Optional CLI tools and dashboard launcher
+    ├── tests/                  Internal regression and end-to-end checks
+    └── ...                     Signal, feature, model and evaluation code
 ```
 
-Environment/editor folders such as `.venv`, `.vs` and `.ipynb_checkpoints` are local tooling state, not pipeline source. `.gitignore` excludes them, patient recordings and generated artifacts.
+`.git` and `.venv` are Git/Python tooling folders. Keep `src/`: it contains the algorithms the notebooks import. The notebooks must stay inside this project.
 
-## Commands
+## Key parameters and future participants
 
-Use **module commands from the project root** for consistent imports and configuration paths.
-
-| Task | Command after `.venv/Scripts/python.exe` |
+| Parameter | Meaning |
 |---|---|
-| Preprocess | `-m scripts.preprocess --config config/config.yaml` |
-| Extract features | `-m scripts.prepare_features --config config/config.yaml` |
-| Check readiness without fitting | `-m scripts.train --config config/config.yaml` |
-| Train and evaluate | `-m scripts.train --config config/config.yaml --start-training` |
-| Regenerate prediction reports | `-m scripts.validate_model --run-dir outputs/training/<run>` |
-| Regression tests | `-m unittest discover -s tests -v` |
-| Small training smoke test | `-m tests.smoke.training` |
-| Test live dashboard | `-m tests.smoke.dashboard --eeg-only` |
-| Audit waveforms | `-m tests.checks.preprocessing --config config/config.yaml` |
-| Audit features | `-m tests.checks.features --config config/config.yaml` |
+| `DATASET_NAME` | Dataset/experiment group; use the same value in both notebooks |
+| `SUBJECTS` / `RECORDINGS` | Which people/runs to prepare; `None` selects all available matches |
+| `MODALITIES` / `CHANNELS` | Sensors and exact channel names; all four sensor types are enabled initially |
+| `WINDOW_SEC` / `STRIDE_SEC` | Signal duration per example / spacing between examples |
+| `MINIMUM_WARNING_MIN` / `OCCURRENCE_PERIOD_MIN` | Future interval used to assign forecast labels |
+| `PATIENT_SPLITS` | Disjoint train, validation and test patient lists |
+| `MODEL_GRIDS` / `FEATURE_K` | Models/parameter choices to compare and selected feature count |
+| `MAX_FEATURE_MATRIX_GIB` | Dense feature-matrix memory guard; fitting requires additional memory |
 
-Former root scripts have moved into `scripts/` and `tests/`. The top-level dashboard command remains unchanged. [Testing guide](tests/README.md)
+Teaching defaults use five-second windows, **60-second stride**, native sensor rates and a **30–40 minute forecast**. At decision time `t`, a positive label targets onset in `[t + 30 min, t + 40 min)`. Invalid/unobserved periods are excluded. The notebook explains how to restore the original five-second stride and 256 Hz output. A sparse stride does not represent continuous monitoring.
 
-## What goes where?
+New `sub-*` folders are discovered automatically with `SUBJECTS = None`. Rerun notebook 1 to include them: saved snapshots freeze their original recording selection. Then review the patient assignments in notebook 2. Training loads a dense feature table and is not out of core.
 
-- Edit parameters in `config/config.yaml` or the dashboard.
-- Keep algorithms in `src/` and CLI argument handling in `scripts/`.
-- Put regression tests, smoke tests and test documentation in `tests/`.
-- Keep original EDF/JSON/TSV recordings in `data/raw/`.
-- Put generated reports in `outputs/`. Experiment figures and reports stay beside their saved configuration and model.
-- Keep manifests and prepared arrays/features together in `data/interim/` or each dashboard experiment's `interim/`.
+## Prepared data, logs and models
 
-Existing experiment directories are preserved because manifests contain absolute artifact paths. Audit summaries formerly in `data/interim/` now live in `outputs/reports/preprocessing/` and `outputs/reports/features/`. [Output directory guide](outputs/README.md)
+Notebook output lives under `audit/runs/notebooks/<DATASET_NAME>/`:
 
-## Qualification and clean starts
+- `prepared/<settings-hash>/`: configuration, signal windows, features, summary and `preparation.log`.
+- `handoff.json`: the exact prepared dataset read by notebook 2.
+- `training/<timestamp>/`: model, configuration, predictions, metrics, plots and `training.log`.
 
-`qualification` in the configuration is enabled by default. It excludes recordings with missing required files or preprocessing errors, recordings with no eligible forecast windows, and patients that are selected but not assigned to train, validation, or test. Each exclusion is printed as `FILTERED ...` in the pipeline log and saved in the experiment's `interim/qualification.json`.
+Changing models reuses preparation. Changing participants, sensors, windows, labels or features requires notebook 1 again. A training directory's `complete.json` confirms successful model saving and reload verification. [Output guide](documentation/AUDIT.md)
 
-Use **Clear generated data & logs** in the dashboard for a fresh run. After its confirmation, it clears generated interim artifacts, shared prepared snapshots, reports, training outputs, smoke-test artifacts, and dashboard experiment history. It preserves `data/raw/`, source code, documentation, the configuration files, and `outputs/README.md`.
+Raw data and generated files under `data/` and `audit/` are excluded from Git, apart from `audit/README.md`. They will not appear after cloning from GitHub; the notebooks create output folders when run. `audit/archive/` and `audit/maintenance/` describe optional local history, not files required to execute a fresh checkout. Never place recordings, credentials or trained models in a source-code commit.
 
-## Documentation
+## Common problems
 
-- [Preprocessing, timing and labels](docs/PREPROCESSING.md)
-- [Training architecture](docs/TRAINING_PIPELINE.md)
-- [Validation metrics and research sources](docs/VALIDATION_PIPELINE.md)
-- [Feature and model research decisions](docs/RESEARCH_DECISIONS.md)
-- [Dashboard and API](docs/DASHBOARD.md)
-- [Testing and verification](tests/README.md)
+| Problem | What to check |
+|---|---|
+| `No EDF recordings` | Files are extracted and participant folders are directly under `data/raw/` |
+| Missing sensor/event/channel | Complete the download and match the selected modalities/channels; retain each run's event TSV |
+| Imports fail | Install `requirements.txt` and select the project's Python kernel |
+| No handoff / stale features | Finish notebook 1 with the matching `DATASET_NAME`; rerun after changing preparation settings |
+| Not enough patients/classes/events | Read the readiness counts; add eligible data or deliberately redesign the study |
+| Memory/disk guard | Use fewer recordings/sensors, increase stride, or use a machine with more memory/storage |
+| Slow processing | Check progress in `preparation.log`; completed caches can be reused on rerun |
 
-## Scientific status
+Full tracebacks and step timings appear in `preparation.log` and `training.log`. The notebooks include waveform/feature previews and `%debug` guidance. Do not bypass failed readiness checks to obtain a score.
 
-The engineering workflow has passed automated and small synthetic checks. Full real-population training remains pending additional patients and explicit patient partitions.
+## Further reading and verification
 
-The default forecast targets onset 30–40 minutes after the decision time. Publisher-relative synchronization remains an assumption, and alarm rates apply to eligible observation windows. Synthetic scores do not demonstrate clinical forecasting performance.
+[Documentation index](documentation/README.md) · [Preprocessing](documentation/PREPROCESSING.md) · [Training](documentation/TRAINING_PIPELINE.md) · [Validation](documentation/VALIDATION_PIPELINE.md) · [Testing](documentation/TESTING.md)
 
+```powershell
+.venv/Scripts/python.exe -m unittest discover -s src/tests -v
+.venv/Scripts/python.exe -m src.tests.smoke.notebooks
+.venv/Scripts/python.exe -m src.tests.smoke.notebooks --real
+```
+
+These are engineering checks. The real-data notebook check uses four selected EEG recordings, not the complete cohort. Results are conditional on eligible forecast windows and do not establish clinical forecasting performance. Alignment remains the documented publisher-relative timing assumption.

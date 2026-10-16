@@ -47,12 +47,12 @@ class Handler(BaseHTTPRequestHandler):
         try:
             self.guard();path=unquote(urlparse(self.path).path)
             if path=='/api/bootstrap':
-                config=yaml.safe_load((self.server.jobs.root/'config'/'config.yaml').read_text(encoding='utf-8-sig'))
+                config=yaml.safe_load((self.server.jobs.root / 'src' / 'config'/'config.yaml').read_text(encoding='utf-8-sig'))
                 return self.send({'config':config,'token':self.server.token,
                                   'subjects':sorted(p.name for p in (self.server.jobs.root/'data'/'raw').glob('sub-*') if p.is_dir())})
             if path=='/api/jobs':return self.send(self.server.jobs.list())
             if path=='/api/real-check':
-                path=self.server.jobs.root/'config/real_data_check.yaml'
+                path=self.server.jobs.root/'src/config/real_data_check.yaml'
                 config=yaml.safe_load(path.read_text())
                 self.server.jobs.validate(config)
                 from src.data.bids_loader import BIDSLoader, require_complete_recordings
@@ -61,10 +61,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send({'config':config})
             if path=='/api/demo':
                 root=self.server.jobs.root
-                pointer=root/'outputs/smoke_tests/latest.json'
-                if not pointer.exists():raise ValueError('Quick-test fixtures are unavailable; run python -m tests.smoke.training once to create them')
+                pointer=root/'audit/runs/smoke_tests/latest.json'
+                if not pointer.exists():raise ValueError('Quick-test fixtures are unavailable; run python -m src.tests.smoke.training once to create them')
                 report=Path(json.loads(pointer.read_text())['report']).resolve()
-                if not report.is_relative_to(root/'outputs/smoke_tests'):raise PermissionError('Invalid demo fixture path')
+                if not report.is_relative_to(root/'audit/runs/smoke_tests'):raise PermissionError('Invalid demo fixture path')
                 config=yaml.safe_load((report.parent/'synthetic_config.yaml').read_text())
                 self.server.jobs.validate(config)
                 return self.send({'config':config})

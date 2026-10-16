@@ -18,3 +18,9 @@ pyyaml>=6.0
 
 # Visualization & Debugging
 matplotlib>=3.7.0
+
+# Notebook interface, kernel, and optional execution checks
+notebook>=7.0
+ipykernel>=6.0
+nbformat>=5.9
+nbclient>=0.8

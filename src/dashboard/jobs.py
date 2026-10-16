@@ -17,8 +17,8 @@ from src.training.registry import candidates
 MODES = {'preprocess':['preprocessing'], 'features':['preprocessing','features'],
          'check':['preprocessing','features','readiness'],
          'train':['preprocessing','features','readiness','training']}
-SCRIPTS = {'preprocessing':'scripts.preprocess','features':'scripts.prepare_features',
-           'readiness':'scripts.train','training':'scripts.train'}
+SCRIPTS = {'preprocessing':'src.commands.preprocess','features':'src.commands.prepare_features',
+           'readiness':'src.commands.train','training':'src.commands.train'}
 PREPARATION_SECTIONS=('dataset','sensors','alignment','preprocessing','labels','execution','qualification','features')
 TRAINING_SECTIONS=('training','validation')
 
@@ -30,11 +30,11 @@ def now():
 class Jobs:
     def __init__(self, root):
         self.root=Path(root).resolve()
-        self.directory=self.root/'outputs'/'dashboard'
+        self.directory=self.root / 'audit' / 'runs'/'dashboard'
         self.directory.mkdir(parents=True,exist_ok=True)
         # Prepared arrays/features are intentionally outside individual dashboard jobs.
         # They are immutable snapshots that can be selected by many later training jobs.
-        self.prepared_directory=self.root/'outputs'/'prepared'
+        self.prepared_directory=self.root / 'audit' / 'runs'/'prepared'
         self.prepared_directory.mkdir(parents=True,exist_ok=True)
         self.lock=threading.RLock();self.process=None;self.active=None;self.tree=None
         for path in self.directory.glob('*/state.json'):
@@ -79,10 +79,10 @@ class Jobs:
         with self.lock:
             if self.active:
                 raise ValueError('Cancel or wait for the active experiment before clearing generated files')
-            targets=[self.root/'data'/'interim', self.root/'outputs'/'dashboard', self.prepared_directory,
-                     self.root/'outputs'/'reports', self.root/'outputs'/'training',
-                     self.root/'outputs'/'figures', self.root/'outputs'/'logs',
-                     self.root/'outputs'/'smoke_tests', self.root/'outputs'/'real_data_check']
+            targets=[self.root/'audit'/'runs'/'cli_prepared', self.root / 'audit' / 'runs'/'dashboard', self.prepared_directory,
+                     self.root / 'audit' / 'runs'/'reports', self.root / 'audit' / 'runs'/'training',
+                     self.root / 'audit' / 'runs'/'figures', self.root / 'audit' / 'runs'/'logs',
+                     self.root / 'audit' / 'runs'/'smoke_tests', self.root / 'audit' / 'runs'/'real_data_check']
             removed=0;cleared=[]
             for target in targets:
                 target=target.resolve()

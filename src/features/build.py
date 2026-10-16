@@ -19,7 +19,7 @@ def build_features(config):
     expected={r['id'] for r in BIDSLoader(config['dataset']['raw_dir']).selected_runs(config['dataset'])}
     observed={r['run'] for r in reports}
     if (observed!=expected if not settings(config)['enabled'] else not observed.issubset(expected)):
-        raise ValueError('Downloaded/selected runs differ from preprocessing manifest; run python -m scripts.preprocess first')
+        raise ValueError('Downloaded/selected runs differ from preprocessing manifest; run python -m src.commands.preprocess first')
     entries=[]
     feature_cfg=config['features']
     code={str(p):p.read_text() for p in Path(__file__).parent.glob('*.py')}
@@ -28,9 +28,9 @@ def build_features(config):
         previous=json.loads((directory/'config.json').read_text())
         for key in ('preprocessing','alignment','sensors','labels'):
             if previous[key]!=config[key]:
-                raise ValueError(f'Stale preprocessing for {r["run"]}: {key}; run python -m scripts.preprocess first')
+                raise ValueError(f'Stale preprocessing for {r["run"]}: {key}; run python -m src.commands.preprocess first')
         if config['dataset']['subjects'] is not None and previous['dataset']['subjects']!=config['dataset']['subjects']:
-            raise ValueError('Preprocessing subject selection differs; run python -m scripts.preprocess first')
+            raise ValueError('Preprocessing subject selection differs; run python -m src.commands.preprocess first')
         key=digest({'report':r,'features':feature_cfg,'code':code})
         dest=out/'features'/key/r['run']
         dest.mkdir(parents=True,exist_ok=True)

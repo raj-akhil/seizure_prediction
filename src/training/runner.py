@@ -19,7 +19,7 @@ def train(config, X, meta, events, entries, indices, folds):
 
 
 def _train(config, X, meta, events, entries, indices, folds):
-    """Call after explicit authorization via python -m scripts.train --start-training."""
+    """Call after explicit authorization via python -m src.commands.train --start-training."""
     t=config['training'];train_idx=indices['train'];val_idx=indices['validation'];test_idx=indices['test']
     target=Path(t['output_dir'])
     if not target.is_absolute():
