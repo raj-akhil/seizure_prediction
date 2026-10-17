@@ -73,16 +73,22 @@ No AWS credentials are needed for this public download. The include rule retains
 4. Run **Start a session** once, then continue in order. Inspect the waveforms, exclusion counts and patient/class counts.
 5. For training, use `RUN_TRAINING=True` and enough eligible people, review `PATIENT_SPLITS`, restart the kernel and run from the top. Wait for **SESSION COMPLETE**, then open the printed report path.
 
-The current download contains `CROSStop SD` in all 105 EEG recordings, `BTEleft SD` in 68, and `BTEright SD` in 37. Examples:
+The default uses **two EEG inputs for every example**, in this order:
 
 ```python
-EEG_CHANNELS = ["CROSStop SD"]                  # Default common channel
-EEG_CHANNELS = ["BTEleft SD", "CROSStop SD"]   # Select compatible participants too
-EEG_CHANNELS = ["BTEright SD"]                 # Only recordings with this exact channel
-EEG_CHANNELS = None                            # Common exact names across selected recordings
+EEG_CHANNEL_MODE = "local_cross"
+EEG_CHANNELS = None
+SUBJECTS = None
 ```
 
-`BTEleft SD` and `BTEright SD` measure local same-side differences behind the left/right ear. `CROSStop SD` spans electrodes behind opposite ears; it is not a vertex/Cz electrode. All are behind-ear recordings. See the [dataset placement description and Figure 2](https://www.nature.com/articles/s41597-025-05580-x) and the expanded combination/participant guide in notebook section 2. Recorded channels are not equivalent to physical electrode counts. Left/right BTE labels are not silently interchanged. Channel order is saved in the model; new inference data must use the same order.
+1. `local_ear`: the recorded `BTEleft SD` or `BTEright SD` for that patient.
+2. `cross_head`: the recorded `CROSStop SD` from the same EEG file.
+
+The current ten patients provide 105 compatible recordings: 68 left-setup and 37 right-setup. The inventory displays each actual source-channel pair and its left/right side. The model receives filtered waveforms with shape **2 channels × 3,840 samples** per default 30-second example. No channel is synthesized and no polarity is changed. A recording without cross-head, or with an ambiguous local side, stops inventory rather than being silently skipped. Bilateral-only setups in the full dataset need a separately configured experiment.
+
+For a cross-head-only comparison, set `EEG_CHANNEL_MODE="exact"`, `EEG_CHANNELS=["CROSStop SD"]`, and `SUBJECTS=None`. In exact mode, `EEG_CHANNELS=None` uses shared exact channel names. Other exact combinations and compatible patient lists are explained in notebook section 2. Exact mode never substitutes left/right channels.
+
+These are voltage differences between behind-ear electrodes; `CROSStop SD` is not a vertex/Cz electrode. See the [dataset placement description and Figure 2](https://www.nature.com/articles/s41597-025-05580-x). Pooled `local_ear` means the clinically selected side, not a fixed left/right device. The actual source names, laterality and ordered mapping are saved per recording in `processed/recordings.json`, `report/session.json`, and `model/model.pt`. Whole-patient stratification also considers recorded side, with split membership printed for inspection. New channel modes need a new session and retraining; previous sessions remain unchanged.
 
 The loader opens only `sub-*/ses-*/eeg/*_eeg.edf`, associated EEG JSON and event TSV files. ECG/EMG/movement originals stay on disk and are never opened by this workflow. Every channel selection still trains the waveform CNN + LSTM; there is no shallow-learning fallback.
 
@@ -132,3 +138,5 @@ Raw-waveform deep learning does **not** guarantee better scores. Inspect held-ou
 The notebook has debugging checks and reports errors inside the session. Verification passed on four synthetic participants, two-patient preparation, and four real EEG recordings (1,479 eligible windows, 40 positive windows). The real check used two training epochs and a 120-second stride; saved-model predictions matched 532 held-out rows in a fresh Python process. Channel order, training-only normalization, noise filtering and protection against overwriting sessions were also checked. Temporary testing files were removed. These checks verify software behavior, not improved prediction performance.
 
 The seizure selector also passed known-answer tests for exact/prefix matching, unrelated-seizure exclusions, unique event counting and patient stratification. A full focal-aware run on five EEG recordings from four people completed with 1,231 eligible windows and 35 positives, including model reload and matching split/evaluation event counts. Rare-target failures and the larger-cohort split search were checked separately.
+
+The default two-channel mapping was checked against all 105 local EEG headers (68 left-setup, 37 right-setup). A two-epoch check on four real recordings from four patients completed processing, CNN–LSTM training, evaluation and model reload with both local-ear sides represented. Persisted waveform values matched the selected EDF channels in order; a fresh process reproduced 413 validation predictions. Missing/ambiguous channel rejection, exact-mode comparisons, side-aware patient splitting and both-channel plots were checked. Temporary test files were removed. This verifies execution, not forecasting accuracy.
