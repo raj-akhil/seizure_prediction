@@ -9,10 +9,9 @@ __pycache__/
 .env.*
 !.env.example
 
-# Original participant data and generated results stay local.
-# Anchor these paths so src/data/ remains a source package.
-/data/
-/audit/**
-!/audit/README.md
+# Original source data and per-session outputs stay local.
+/source/
+/intermediate/
 *.joblib
+*.pkl
 *.log
